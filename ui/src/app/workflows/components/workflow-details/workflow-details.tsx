@@ -197,7 +197,8 @@ export const WorkflowDetails = ({history, location, match}: RouteComponentProps<
             'workflows.argoproj.io/workflow-event-binding',
             'workflows.argoproj.io/resubmitted-from-workflow'
         ]) {
-            const v = workflow?.metadata.labels[k];
+            const labels = workflow?.metadata?.labels || {};
+            const v = labels[k];
             if (v) {
                 items.push({
                     title: 'Previous Runs',
@@ -475,7 +476,7 @@ export const WorkflowDetails = ({history, location, match}: RouteComponentProps<
                     {parsedSidePanel.type === 'logs' && (
                         <WorkflowLogsViewer workflow={workflow} initialPodName={podName} nodeId={parsedSidePanel.nodeId} container={parsedSidePanel.container} archived={false} />
                     )}
-                    {parsedSidePanel.type === 'events' && <EventsPanel namespace={namespace} kind='Pod' name={parsedSidePanel.nodeId} />}
+                    {parsedSidePanel.type === 'events' && <EventsPanel namespace={namespace} kind='Pod' name={podName} />}
                     {parsedSidePanel.type === 'share' && <WidgetGallery namespace={namespace} name={name} />}
                     {parsedSidePanel.type === 'yaml' && <WorkflowYamlViewer workflow={workflow} selectedNode={selectedNode} />}
                     {!parsedSidePanel}

@@ -381,7 +381,7 @@ func (woc *wfOperationCtx) operate(ctx context.Context) {
 					Message:      node.Message,
 					TemplateName: node.TemplateName,
 					Phase:        string(node.Phase),
-					PodName:      node.ID,
+					PodName:      wfutil.GeneratePodName(woc.wf.Name, node.Name, node.TemplateName, node.ID, wfutil.GetPodNameVersion()),
 					FinishedAt:   node.FinishedAt,
 				})
 		}
@@ -1230,6 +1230,8 @@ func (woc *wfOperationCtx) assessNodeStatus(pod *apiv1.Pod, old *wfv1.NodeStatus
 			new.Phase = wfv1.NodeSucceeded
 		} else {
 			new.Phase, new.Message = woc.inferFailedReason(pod, tmpl)
+			woc.log.WithField("displayName", old.DisplayName).WithField("templateName", old.TemplateName).
+				WithField("pod", pod.Name).Infof("Pod failed: %s", new.Message)
 		}
 		new.Daemoned = nil
 	case apiv1.PodRunning:
@@ -1335,6 +1337,14 @@ func (woc *wfOperationCtx) assessNodeStatus(pod *apiv1.Pod, old *wfv1.NodeStatus
 		if c.Name == common.WaitContainerName && c.State.Terminated == nil && new.Phase.Completed() {
 			woc.log.WithField("new.phase", new.Phase).Info("leaving phase un-changed: wait container is not yet terminated ")
 			new.Phase = old.Phase
+		}
+	}
+	// If the init container failed, we should mark the node as failed.
+	for _, c := range pod.Status.InitContainerStatuses {
+		if c.State.Terminated != nil && int(c.State.Terminated.ExitCode) != 0 {
+			new.Phase = wfv1.NodeFailed
+			woc.log.WithField("new.phase", new.Phase).Info("marking node as failed since init container has non-zero exit code")
+			break
 		}
 	}
 
@@ -2309,7 +2319,8 @@ func (woc *wfOperationCtx) initializeNode(nodeName string, nodeType wfv1.NodeTyp
 func (woc *wfOperationCtx) markNodePhase(nodeName string, phase wfv1.NodePhase, message ...string) *wfv1.NodeStatus {
 	node := woc.wf.GetNodeByName(nodeName)
 	if node == nil {
-		panic(fmt.Sprintf("workflow '%s' node '%s' uninitialized when marking as %v: %s", woc.wf.Name, nodeName, phase, message))
+		woc.log.Warningf("workflow '%s' node '%s' uninitialized when marking as %v: %s", woc.wf.Name, nodeName, phase, message)
+		node = &wfv1.NodeStatus{}
 	}
 	if node.Phase != phase {
 		if node.Phase.Fulfilled() {
@@ -3736,7 +3747,7 @@ func (woc *wfOperationCtx) substituteGlobalVariables(params common.Parameters) e
 // POD_NAMES environment variable
 func (woc *wfOperationCtx) getPodName(nodeName, templateName string) string {
 	version := wfutil.GetWorkflowPodNameVersion(woc.wf)
-	return wfutil.PodName(woc.wf.Name, nodeName, templateName, woc.wf.NodeID(nodeName), version)
+	return wfutil.GeneratePodName(woc.wf.Name, nodeName, templateName, woc.wf.NodeID(nodeName), version)
 }
 
 func (woc *wfOperationCtx) getServiceAccountTokenName(ctx context.Context, name string) (string, error) {

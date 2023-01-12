@@ -265,7 +265,6 @@ func ApplySubmitOpts(wf *wfv1.Workflow, opts *wfv1.SubmitOpts) error {
 		wfAnnotations = make(map[string]string)
 	}
 	if opts.Annotations != "" {
-		fmt.Println(opts.Annotations)
 		passedAnnotations, err := cmdutil.ParseLabels(opts.Annotations)
 		if err != nil {
 			return fmt.Errorf("expected Annotations of the form: NAME1=VALUE2,NAME2=VALUE2. Received: %s: %w", opts.Labels, err)
@@ -757,7 +756,7 @@ func getDescendantNodeIDs(wf *wfv1.Workflow, node wfv1.NodeStatus) []string {
 func deletePodNodeDuringRetryWorkflow(wf *wfv1.Workflow, node wfv1.NodeStatus, deletedPods map[string]bool, podsToDelete []string) (map[string]bool, []string) {
 	templateName := GetTemplateFromNode(node)
 	version := GetWorkflowPodNameVersion(wf)
-	podName := PodName(wf.Name, node.Name, templateName, node.ID, version)
+	podName := GeneratePodName(wf.Name, node.Name, templateName, node.ID, version)
 	if _, ok := deletedPods[podName]; !ok {
 		deletedPods[podName] = true
 		podsToDelete = append(podsToDelete, podName)
@@ -803,7 +802,6 @@ func resetConnectedParentGroupNodes(oldWF *wfv1.Workflow, newWF *wfv1.Workflow, 
 
 // FormulateRetryWorkflow formulates a previous workflow to be retried, deleting all failed steps as well as the onExit node (and children)
 func FormulateRetryWorkflow(ctx context.Context, wf *wfv1.Workflow, restartSuccessful bool, nodeFieldSelector string, parameters []string) (*wfv1.Workflow, []string, error) {
-
 	switch wf.Status.Phase {
 	case wfv1.WorkflowFailed, wfv1.WorkflowError:
 	default:
@@ -1079,7 +1077,14 @@ func patchShutdownStrategy(ctx context.Context, wfClient v1alpha1.WorkflowInterf
 		return errors.InternalWrapError(err)
 	}
 	err = waitutil.Backoff(retry.DefaultRetry, func() (bool, error) {
-		_, err := wfClient.Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
+		wf, err := wfClient.Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return !errorsutil.IsTransientErr(err), err
+		}
+		if wf.Status.Fulfilled() {
+			return true, fmt.Errorf("cannot shutdown a completed workflow")
+		}
+		_, err = wfClient.Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
 		if apierr.IsConflict(err) {
 			return false, nil
 		}
